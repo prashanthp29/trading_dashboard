@@ -67,6 +67,13 @@
       return this.metaMap[symbol] || null;
     }
 
+    categoryOf(symbol) {
+      if (!symbol) return null;
+      const g = (this.catalog.groups || []).find((grp) =>
+        grp.items.some((it) => it.symbol === symbol));
+      return g ? g.name : null;
+    }
+
     /* ---------- grid / panes ---------- */
     async render() {
       // Tear down existing panes.

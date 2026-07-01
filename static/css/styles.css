@@ -115,12 +115,13 @@ body {
 
 .pane-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
 .pane-controls select {
-  flex: 1 1 0;
+  flex: 1 1 30%;
   min-width: 0;
   background: var(--panel-2);
   color: var(--text);
@@ -131,12 +132,38 @@ body {
   font-size: 12px;
 }
 .pane-controls select:disabled { opacity: .45; cursor: not-allowed; }
-.sel-symbol    { flex: 1.3 1 0; }
-.sel-timeframe { flex: .7 1 0; }
+.sel-category  { flex: 1 1 45%; }
+.sel-symbol    { flex: 1 1 45%; }
+.sel-expiry    { flex: 1 1 45%; }
+.sel-option    { flex: 1 1 45%; }
+.sel-timeframe { flex: 1 1 20%; }
 
 .chart-host { flex: 1 1 auto; min-height: 0; position: relative; }
+
+/* Instrument label pinned to the chart's top-right corner. */
+.chart-label {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 3;
+  pointer-events: none;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(19, 23, 34, .72);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  max-width: 85%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chart-label.opt { color: #ffd479; border-color: #4a3f1e; }
 
 /* small panes (6/8 count) -> tighten typography */
 .grid[data-count="6"] .ticker,
 .grid[data-count="8"] .ticker { font-size: 12px; padding: 4px 8px; }
 .grid[data-count="8"] .pane-controls select { font-size: 11px; padding: 4px; }
+.grid[data-count="8"] .chart-label,
+.grid[data-count="6"] .chart-label { font-size: 11px; }

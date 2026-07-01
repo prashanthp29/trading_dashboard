@@ -12,15 +12,11 @@ data_source.py):
     GET  /api/options      -> CE/PE option chain (5 strikes either side of ATM)
     POST /api/subscribe    -> set the symbols we want live updates for
     GET  /api/stream       -> Server-Sent-Events stream of live ticks
-
-Live data flow:
-    Hyperliquid websocket  ─┐
-                            ├─► on_tick() ─► fan-out to every SSE client queue
-    yfinance poll loop     ─┘
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import queue
 import threading
@@ -43,7 +39,6 @@ _clients_lock = threading.Lock()
 _desired: set[str] = set()
 _desired_lock = threading.Lock()
 
-
 def broadcast(tick: dict) -> None:
     """Push a tick to every connected SSE client (drop if a client is slow)."""
     msg = json.dumps(tick)
@@ -54,12 +49,10 @@ def broadcast(tick: dict) -> None:
             except queue.Full:
                 pass
 
-
 def _resolve_underlying(symbol: str) -> str:
-    """Option tokens (UNDERLYING|STRIKE|CE) resolve to their underlying."""
+    """Option tokens resolve to their underlying symbol."""
     opt = ds.parse_option_token(symbol)
     return opt["underlying"] if opt else symbol
-
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -68,11 +61,9 @@ def _resolve_underlying(symbol: str) -> str:
 def index():
     return render_template("index.html")
 
-
 @app.route("/api/symbols")
 def api_symbols():
     return jsonify(catalog.build_catalog(extra_crypto=app.config.get("CRYPTO_UNIVERSE", [])))
-
 
 @app.route("/api/candles")
 def api_candles():
@@ -82,21 +73,58 @@ def api_candles():
     if not symbol:
         return jsonify({"error": "symbol required"}), 400
 
-    underlying = _resolve_underlying(symbol)
-    is_option = underlying != symbol
+    opt = ds.parse_option_token(symbol)
+    if not opt:
+        # Plain symbol (index / stock / crypto).
+        provider = ds.get_provider(symbol)
+        return jsonify({
+            "symbol": symbol, "underlying": symbol, "is_option": False,
+            "interval": interval, "candles": provider.get_candles(symbol, interval, limit),
+            "option": None, "note": None,
+        })
+
+    # Option token -> chart a theoretical Black-Scholes premium built from the
+    # underlying's OHLC (no free NSE option-price feed exists).
+    underlying = opt["underlying"]
     provider = ds.get_provider(underlying)
-    candles = provider.get_candles(underlying, interval, limit)
+    base = provider.get_candles(underlying, interval, limit)
+
+    try:
+        strike = float(opt["strike"])
+    except (TypeError, ValueError):
+        strike = 0.0
+
+    # Resolve the expiry timestamp (fall back to the nearest weekly expiry).
+    expiry_epoch = None
+    if opt.get("expiry"):
+        try:
+            expiry_epoch = ds._expiry_epoch(_dt.date.fromisoformat(opt["expiry"]))
+        except Exception:
+            expiry_epoch = None
+    if expiry_epoch is None:
+        exps = ds.build_expiries(n_weekly=1, n_monthly=0)
+        expiry_epoch = exps[0]["epoch"] if exps else int(time.time()) + 7 * 86400
+
+    tf_sec = ds.TIMEFRAME_SECONDS.get(interval, 60)
+    sigma = ds.historical_volatility(base, tf_sec)
+    candles = ds.build_option_candles(base, strike, opt["type"], expiry_epoch, sigma)
+
     return jsonify({
         "symbol": symbol,
         "underlying": underlying,
-        "is_option": is_option,
+        "is_option": True,
         "interval": interval,
         "candles": candles,
-        # When an option is selected we chart the underlying until a broker
-        # provider supplies real option candles.
-        "note": "charting underlying (no native option feed)" if is_option else None,
+        "option": {
+            "strike": strike,
+            "type": opt["type"],
+            "expiry": opt.get("expiry"),
+            "expiry_epoch": expiry_epoch,
+            "sigma": round(sigma, 4),
+            "r": ds.RISK_FREE_RATE,
+        },
+        "note": "theoretical Black-Scholes premium derived from the underlying",
     })
-
 
 @app.route("/api/options")
 def api_options():
@@ -113,13 +141,11 @@ def api_options():
     chain["supported"] = True
     return jsonify(chain)
 
-
 @app.route("/api/subscribe", methods=["POST"])
 def api_subscribe():
     """Frontend posts the full set of symbols it wants live. We diff & route."""
     body = request.get_json(silent=True) or {}
     wanted_raw = body.get("symbols", [])
-    # Map option tokens to their underlying for the live feed.
     wanted = {_resolve_underlying(s) for s in wanted_raw if s}
 
     with _desired_lock:
@@ -135,11 +161,8 @@ def api_subscribe():
 
     return jsonify({"subscribed": sorted(wanted)})
 
-
-# Built from chr(10) instead of "\n" literals so the source survives copy-paste
-# (pasting can otherwise turn "\n" into real line breaks and split the string).
+# Built from chr(10) instead of newline escapes so the source survives copy-paste.
 _NL = chr(10)
-
 
 @app.route("/api/stream")
 def api_stream():
@@ -148,14 +171,12 @@ def api_stream():
         with _clients_lock:
             _clients.append(q)
         try:
-            # Tell the client the stream is live.
             yield "event: ready" + _NL + "data: {}" + _NL + _NL
             while True:
                 try:
                     msg = q.get(timeout=15)
                     yield "data: " + msg + _NL + _NL
                 except queue.Empty:
-                    # heartbeat keeps the connection (and proxies) alive
                     yield ": keepalive" + _NL + _NL
         finally:
             with _clients_lock:
@@ -167,24 +188,19 @@ def api_stream():
                              "X-Accel-Buffering": "no",
                              "Connection": "keep-alive"})
 
-
 # ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
 def bootstrap() -> None:
-    # Merge the live Hyperliquid coin universe into the catalog.
     universe = ds.hyperliquid.fetch_universe()
     app.config["CRYPTO_UNIVERSE"] = universe
     catalog.refresh_lookup(extra_crypto=universe)
     print(f"[startup] {len(universe)} crypto coins from Hyperliquid")
 
-    # Start live providers; both push into the same broadcast() fan-out.
     ds.hyperliquid.start(broadcast)
     ds.yfinance_provider.start(broadcast)
     print("[startup] live providers running")
 
-
 if __name__ == "__main__":
     bootstrap()
-    # threaded=True is required so SSE streams + background threads coexist.
     app.run(host="127.0.0.1", port=5000, threaded=True, debug=False)

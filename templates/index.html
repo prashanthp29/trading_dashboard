@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trading Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+  <!-- Lightweight Charts, loaded resiliently: non-blocking, with CDN fallback.
+       Injected dynamically so a slow/blocked CDN never leaves the page blank. -->
+  <script>
+    (function () {
+      var sources = [
+        "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js",
+        "https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js",
+        // Optional local copy: drop the file at static/js/vendor/ to run fully offline.
+        "/static/js/vendor/lightweight-charts.standalone.production.js"
+      ];
+      var i = 0;
+      (function load() {
+        if (i >= sources.length) {
+          console.error("Lightweight Charts failed to load from all sources.");
+          return;
+        }
+        var s = document.createElement("script");
+        s.src = sources[i++];
+        s.onerror = load;            // try the next source
+        document.head.appendChild(s);
+      })();
+    })();
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>Trading Dashboard</h1>
+    </div>
+    <div class="topbar-controls">
+      <label for="chartCount">Charts</label>
+      <select id="chartCount" class="count-select">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="4" selected>4</option>
+        <option value="6">6</option>
+        <option value="8">8</option>
+      </select>
+      <span id="connStatus" class="conn offline" title="Live feed status">live</span>
+    </div>
+  </header>
+
+  <main id="grid" class="grid" data-count="4"></main>
+
+  <!-- Template for a single chart pane -->
+  <template id="paneTemplate">
+    <section class="pane">
+      <div class="ticker">
+        <span class="ticker-symbol">—</span>
+        <span class="ticker-price">--</span>
+        <span class="ticker-change">--</span>
+      </div>
+      <div class="pane-controls">
+        <select class="sel-symbol" title="Symbol"></select>
+        <select class="sel-option" title="Options" disabled></select>
+        <select class="sel-timeframe" title="Timeframe"></select>
+      </div>
+      <div class="chart-host"></div>
+    </section>
+  </template>
+
+  <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/pane.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

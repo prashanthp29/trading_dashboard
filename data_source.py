@@ -404,22 +404,25 @@ class YFinanceProvider(BaseProvider):
         import yfinance as yf
         try:
             t = yf.Ticker(symbol)
+            # Use history() rather than fast_info: fast_info is what raises the
+            # 'currentTradingPeriod' error on some Yahoo responses.
             price = None
-            fi = getattr(t, "fast_info", None)
-            if fi:
-                price = fi.get("last_price") or fi.get("lastPrice")
-            if price is None:
-                hist = t.history(period="1d", interval="1m")
-                if not hist.empty:
-                    price = float(hist["Close"].iloc[-1])
+            for period, interval in (("1d", "1m"), ("5d", "5m"), ("1mo", "1d")):
+                try:
+                    hist = t.history(period=period, interval=interval)
+                except Exception:
+                    continue
+                if hist is not None and not hist.empty:
+                    price = float(hist["Close"].dropna().iloc[-1])
+                    break
             if price is None:
                 return None
-            price = float(price)
             self._last_price[symbol] = price
             return {"price": price, "time": int(time.time())}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[yfinance] quote failed for {symbol}: {exc}")
             return None
+
 
     # ---- options ----------------------------------------------------------
     def supports_options(self, symbol: str) -> bool:
